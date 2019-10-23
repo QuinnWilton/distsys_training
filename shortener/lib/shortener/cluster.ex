@@ -12,7 +12,7 @@ defmodule Shortener.Cluster do
 
   def child_spec(_args) do
     children = [
-      {Cluster.Supervisor, [topology(), [name: Shortener.ClusterSupervisor]]},
+      {Cluster.Supervisor, [topology(), [name: Shortener.ClusterSupervisor]]}
     ]
 
     %{
@@ -23,7 +23,9 @@ defmodule Shortener.Cluster do
   end
 
   def find_node(key) do
-    # TODO - Update with hash ring lookup
+    ring = :persistent_term.get(@ring_key)
+
+    HashRing.find_node(ring, key)
   end
 
   # Sets the canonical set of nodes into persistent storage.
@@ -33,15 +35,26 @@ defmodule Shortener.Cluster do
   end
 
   def update_ring do
-    # TODO - Fetch nodes from persistent store, update hash ring
-    # put the hash ring into persistent term storage.
+    {:ok, nodes} = Storage.get("shortener:cluster")
+
+    nodes = :erlang.binary_to_term(nodes)
+
+    ring =
+      Enum.reduce(nodes, HashRing.new(), fn node, ring ->
+        {:ok, ring} = HashRing.add_node(ring, node)
+
+        ring
+      end)
+
+    :ok = :persistent_term.put(@ring_key, ring)
+
     :ok
   end
 
   defp topology do
     [
       shortener: [
-        strategy: Cluster.Strategy.Gossip,
+        strategy: Cluster.Strategy.Gossip
       ]
     ]
   end

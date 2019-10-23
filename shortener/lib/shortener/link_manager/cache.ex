@@ -6,8 +6,11 @@ defmodule Shortener.LinkManager.Cache do
     GenServer.start_link(__MODULE__, args, name: __MODULE__)
   end
 
-  def lookup(cache \\ __MODULE__, key) do
-    # TODO - Do lookup here
+  def lookup(_cache \\ __MODULE__, key) do
+    case :ets.lookup(__MODULE__, key) do
+      [] -> {:error, :not_found}
+      [{_key, value}] -> {:ok, value}
+    end
   end
 
   def insert(cache \\ __MODULE__, key, value) do
@@ -22,23 +25,27 @@ defmodule Shortener.LinkManager.Cache do
     GenServer.call(cache, :flush)
   end
 
-  def init(args) do
-    # TODO - Replace nil with real table
+  def init(_args) do
+    :ets.new(__MODULE__, [:named_table, read_concurrency: true])
+
     {:ok, %{}}
   end
 
   def handle_cast({:insert, key, value}, data) do
-    # TODO - Build cache insert
+    :ets.insert(__MODULE__, {key, value})
+
     {:noreply, data}
   end
 
   def handle_call({:insert, key, value}, _from, data) do
-    # TODO - Insert the key into the table
+    :ets.insert(__MODULE__, {key, value})
+
     {:reply, :ok, data}
   end
 
   def handle_call(:flush, _from, data) do
-    :ets.delete_all_objects(data.table)
+    :ets.delete_all_objects(__MODULE__)
+
     {:reply, :ok, data}
   end
 end

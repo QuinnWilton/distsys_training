@@ -126,7 +126,7 @@ defmodule Shortener.ClusterManagementTest do
   end
 
   test "api if remote lookup we fetch from storage", %{nodes: nodes} do
-    [n1, n2, n3] = nodes
+    [n1, n2, _n3] = nodes
     url = "https://elixiroutlaws.com"
 
     resp = post("http://localhost:4000", %{"url" => url})
@@ -144,4 +144,3 @@ defmodule Shortener.ClusterManagementTest do
     end
   end
 end
-

@@ -7,8 +7,10 @@ defmodule Shortener.Aggregates do
   require Logger
 
   def count_for(table \\ __MODULE__, hash) do
-    # TODO: Do lookup from ets in the client process
-    0
+    case :ets.lookup(__MODULE__, hash) do
+      [] -> 0
+      [{_hash, count}] -> count
+    end
   end
 
   def increment(server \\ __MODULE__, hash) do
@@ -16,7 +18,7 @@ defmodule Shortener.Aggregates do
   end
 
   def merge(server \\ __MODULE__, hash, counter) do
-    GenServer.cast(server, {:merge, hash, counter})
+    GenServer.abcast(server, {:merge, hash, counter})
   end
 
   def flush(server \\ __MODULE__) do
@@ -28,33 +30,62 @@ defmodule Shortener.Aggregates do
   end
 
   def init(_args \\ []) do
-    # TODO: Monitor node connections and disconnects
+    :net_kernel.monitor_nodes(true)
+
+    :ets.new(__MODULE__, [:named_table, read_concurrency: true])
 
     {:ok, %{table: __MODULE__, counters: %{}}}
   end
 
-  def handle_cast({:increment, short_code}, %{counters: counters}=data) do
-    # TODO: Increment counter and broadcast a merge to the other nodes
+  def handle_cast({:increment, short_code}, %{counters: counters} = data) do
+    counters = Map.put_new(counters, short_code, GCounter.new())
+    counters = Map.update!(counters, short_code, &GCounter.increment/1)
 
-    {:noreply, data}
+    counter = Map.get(counters, short_code)
+
+    :abcast = merge(short_code, counter)
+
+    :ets.insert(__MODULE__, {short_code, GCounter.to_i(counter)})
+
+    {:noreply, %{data | counters: counters}}
   end
 
   def handle_cast({:merge, short_code, counter}, data) do
-    # TODO: Merge our existing set of counters with the new counter
+    counters = Map.put_new(data.counters, short_code, GCounter.new())
 
-    {:noreply, data}
+    counters =
+      Map.update!(counters, short_code, fn old ->
+        GCounter.merge(old, counter)
+      end)
+
+    counter = Map.get(counters, short_code)
+
+    :ets.insert(__MODULE__, {short_code, GCounter.to_i(counter)})
+
+    {:noreply, %{data | counters: counters}}
   end
 
   def handle_call(:flush, _from, data) do
     :ets.delete_all_objects(data.table)
+
     {:reply, :ok, %{data | counters: %{}}}
   end
 
+  def handle_info({:nodeup, node}, data) do
+    Enum.each(data.counters, fn {short_code, counter} ->
+      :abcast = merge(short_code, counter)
+    end)
+
+    {:noreply, data}
+  end
+
+  def handle_info({:nodedown, _node}, data) do
+    {:noreply, data}
+  end
+
   def handle_info(msg, data) do
-    # TODO - Handle node disconnects and reconnections
-    Logger.info("Unhandled message: #{inspect msg}")
+    Logger.info("Unhandled message: #{inspect(msg)}")
 
     {:noreply, data}
   end
 end
-
